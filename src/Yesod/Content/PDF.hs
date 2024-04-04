@@ -44,6 +44,8 @@ import System.Process
 import Text.Blaze.Html
 import Text.Blaze.Html.Renderer.Utf8
 import Yesod.Core.Content
+import Data.String
+import Data.Maybe (catMaybes, fromJust)
 
 newtype PDF = PDF { pdfBytes :: ByteString }
             deriving (Eq, Ord, Read, Show)
@@ -85,6 +87,7 @@ wkhtmltopdf opts setupInput =
     hClose tempOutputHandle
     setupInput $ \inputArg -> do
       let args = toArgs opts ++ [inputArg, tempOutputFp]
+      print args
       (_, _, _, pHandle) <- createProcess (proc "wkhtmltopdf" args)
       _ <- waitForProcess pHandle
       PDF <$> Data.ByteString.readFile tempOutputFp
@@ -94,7 +97,9 @@ wkhtmltopdf opts setupInput =
 -- <http://www.yesodweb.com/book/settings-types>.
 data WkhtmltopdfOptions =
   WkhtmltopdfOptions
-    { wkCollate         :: Bool
+    { wkEnableLocalFileAccess :: Bool
+      -- ^ Allow the converter to access files on the local file system.
+    , wkCollate         :: Bool
       -- ^ Collate when printing multiple copies.
     , wkCopies          :: Int
       -- ^ Number of copies to print into the PDF file.
@@ -124,11 +129,16 @@ data WkhtmltopdfOptions =
       -- ^ Time to wait for Javascript to finish in milliseconds.
     , wkWindowStatus    :: Maybe String
       -- ^ String to wait for window.status to be set to.
+    , wkHeader          :: Maybe Header
+      -- ^ Header configuration
+    , wkFooter          :: Maybe Footer
+      -- ^ Footer configuration
     } deriving (Eq, Ord, Show)
 
 instance Default WkhtmltopdfOptions where
   def = WkhtmltopdfOptions
-    { wkCollate               = True
+    { wkEnableLocalFileAccess = False
+    , wkCollate               = True
     , wkCopies                = 1
     , wkGrayscale             = False
     , wkLowQuality            = False
@@ -143,6 +153,8 @@ instance Default WkhtmltopdfOptions where
     , wkZoom                  = 1
     , wkJavascriptDelay       = Nothing
     , wkWindowStatus          = Nothing
+    , wkHeader                = Nothing
+    , wkFooter                = Nothing
     }
 
 -- | Cf. 'wkPageSize'.
@@ -166,6 +178,53 @@ data UnitReal =
   | OtherUnitReal String
   deriving (Eq, Ord, Show)
 
+data Font = Font {
+  fName :: String,
+  fSize :: Double
+}
+  deriving (Eq, Ord, Show)
+
+data Alignment =
+  LeftAlign | CenterAlign | RightAlign
+  deriving (Eq, Ord, Show)
+
+data HFContent =
+    Page -- ^ [page] Replaced by the number of the pages currently being printed
+  | FromPage -- ^ [frompage] Replaced by the number of the first page to be printed
+  | ToPage -- ^ [topage] Replaced by the number of the last page to be printed
+  | WebPage -- ^ [webpage] Replaced by the URL of the page being printed
+  | Section -- ^ [section] Replaced by the name of the current section
+  | SubSection -- ^ [subsection] Replaced by the name of the current subsection
+  | Date -- ^ [date] Replaced by the current date in system local format
+  | IsoDate -- ^ [isodate] Replaced by the current date in ISO 8601 extended format
+  | Time -- ^ [time] Replaced by the current time in system local format
+  | Title -- ^ [title] Replaced by the title of the of the current page object
+  | DocTitle -- ^ [doctitle] Replaced by the title of the output document
+  | SitePage -- ^ [sitepage] Replaced by the number of the page in the current site being converted
+  | SitePages -- ^ [sitepages] Replaced by the number of pages in the current site being converted
+  | Text String -- ^ Just a string
+  | (:+) HFContent HFContent -- ^ Concatenation of two content items
+  deriving (Eq, Ord, Show)
+
+infixr 6 :+
+
+instance IsString HFContent where
+  fromString = Text
+
+data HFConfig = HFConfig {
+  hfFont :: Maybe Font,
+  hfAlignment :: Alignment,
+  hfContent :: HFContent,
+  spacing :: Maybe Double -- ^ Spacing between header/footer and content in mm
+}
+  deriving (Eq, Ord, Show)
+
+newtype Footer = Footer HFConfig
+  deriving (Eq, Ord, Show)
+
+newtype Header = Header HFConfig
+  deriving (Eq, Ord, Show)
+
 -- | (Internal) Convert options to arguments.
 class ToArgs a where
   toArgs :: a -> [String]
@@ -176,9 +235,11 @@ instance ToArgs WkhtmltopdfOptions where
       , if wkCollate opts then "--collate" else "--no-collate"
       , "--copies", show (wkCopies opts)
       , "--zoom",   show (wkZoom   opts)
+
       ] ++
       Prelude.concat
-       [ [ "--grayscale"  | True <- [wkGrayscale  opts] ]
+       [ ["--enable-local-file-access" | wkEnableLocalFileAccess opts]
+       , [ "--grayscale"  | True <- [wkGrayscale  opts] ]
        , [ "--lowquality" | True <- [wkLowQuality opts] ]
        , [ "--disable-smart-shrinking" | True <- [wkDisableSmartShrinking opts] ]
        , toArgs (wkPageSize    opts)
@@ -190,6 +251,8 @@ instance ToArgs WkhtmltopdfOptions where
        , "--margin-left"   : toArgs (wkMarginLeft   opts)
        , "--margin-right"  : toArgs (wkMarginRight  opts)
        , "--margin-top"    : toArgs (wkMarginTop    opts)
+       , maybe [] (\(Header hf) -> hfToArgs "header" hf) (wkHeader opts)
+       , maybe [] (\(Footer hf) -> hfToArgs "footer" hf) (wkFooter opts)
        ]
 
 instance ToArgs PageSize where
@@ -205,3 +268,51 @@ instance ToArgs UnitReal where
   toArgs (Mm x)            = [show x ++ "mm"]
   toArgs (Cm x)            = [show x ++ "cm"]
   toArgs (OtherUnitReal s) = [s]
+
+instance ToArgs Header where
+  toArgs (Header hf) = hfToArgs "header" hf
+
+instance ToArgs Footer where
+  toArgs (Footer hf) = hfToArgs "footer" hf
+
+hfToArgs :: String -> HFConfig -> [String]
+hfToArgs hf (HFConfig font alignment content spacing) =
+  Prelude.concat
+    [ contentArg,
+      fontArgs,
+      spacingArg
+    ]
+  where
+    prefix = "--" ++ hf ++ "-"
+
+    contentArg = case alignment of 
+      LeftAlign -> [prefix <> "left", contentToText content] 
+      CenterAlign -> [prefix <> "center", contentToText content]
+      RightAlign -> [prefix <> "right", contentToText content]
+
+    fontArgs = case font of
+      Just (Font fontName fontSize) -> 
+          [prefix <> "font-name", fontName] <>
+          [prefix <> "font-size", show fontSize]
+      Nothing -> []
+    
+    spacingArg = case spacing of
+      Just s -> [prefix <> "spacing", show s]
+      Nothing -> []
+    
+    contentToText c = case c of 
+      Page -> "[page]"
+      FromPage -> "[frompage]"
+      ToPage -> "[topage]"
+      WebPage -> "[webpage]"
+      Section -> "[section]"
+      SubSection -> "[subsection]"
+      Date -> "[date]"
+      IsoDate -> "[isodate]"
+      Time -> "[time]"
+      Title -> "[title]"
+      DocTitle -> "[doctitle]"
+      SitePage -> "[sitepage]"
+      SitePages -> "[sitepages]"
+      Text s -> s
+      (a :+ b) -> contentToText a ++ contentToText b
