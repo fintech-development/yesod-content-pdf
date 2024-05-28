@@ -9,22 +9,7 @@ module Yesod.Content.PDF
   , typePDF
     -- * Options
   , def
-  , WkhtmltopdfOptions
-  , wkCollate
-  , wkCopies
-  , wkGrayscale
-  , wkLowQuality
-  , wkPageSize
-  , wkOrientation
-  , wkDisableSmartShrinking
-  , wkTitle
-  , wkMarginBottom
-  , wkMarginLeft
-  , wkMarginRight
-  , wkMarginTop
-  , wkZoom
-  , wkJavascriptDelay
-  , wkWindowStatus
+  , WkhtmltopdfOptions (..)
   , PageSize(..)
   , Orientation(..)
   , UnitReal(..)
