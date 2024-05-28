@@ -1,19 +1,6 @@
 -- | Utilities for serving PDF from Yesod.
 --   Uses and depends on command line utility wkhtmltopdf to render PDF from HTML.
-module Yesod.Content.PDF
-  ( -- * Conversion
-    uri2PDF
-  , html2PDF
-    -- * Data type
-  , PDF(..)
-  , typePDF
-    -- * Options
-  , def
-  , WkhtmltopdfOptions (..)
-  , PageSize(..)
-  , Orientation(..)
-  , UnitReal(..)
-  ) where
+module Yesod.Content.PDF where
 
 import Prelude
 import Blaze.ByteString.Builder.ByteString
