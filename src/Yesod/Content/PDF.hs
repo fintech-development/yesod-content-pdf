@@ -38,7 +38,7 @@ import Data.ByteString.Builder (hPutBuilder)
 import Data.Conduit
 import Data.Default (Default(..))
 import Network.URI
-import System.IO
+import System.IO hiding (writeFile)
 import System.IO.Temp
 import System.Process
 import Text.Blaze.Html
@@ -46,6 +46,7 @@ import Text.Blaze.Html.Renderer.Utf8
 import Yesod.Core.Content
 import Data.String
 import Data.Maybe (catMaybes, fromJust)
+import qualified Data.ByteString as BS
 
 newtype PDF = PDF { pdfBytes :: ByteString }
             deriving (Eq, Ord, Read, Show)
@@ -180,7 +181,7 @@ data UnitReal =
 
 data Font = Font {
   fName :: String,
-  fSize :: Double
+  fSize :: Int
 }
   deriving (Eq, Ord, Show)
 
