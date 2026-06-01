@@ -60,8 +60,7 @@ wkhtmltopdf opts setupInput =
     hClose tempOutputHandle
     setupInput $ \inputArg -> do
       let args = toArgs opts ++ [inputArg, tempOutputFp]
-      print args
-      (_, _, _, pHandle) <- createProcess (proc "wkhtmltopdf" args)
+      (_, _, _, pHandle) <- createProcess (proc "wkhtmltopdf" args) { std_out = NoStream, std_err = NoStream }
       _ <- waitForProcess pHandle
       PDF <$> Data.ByteString.readFile tempOutputFp
 
